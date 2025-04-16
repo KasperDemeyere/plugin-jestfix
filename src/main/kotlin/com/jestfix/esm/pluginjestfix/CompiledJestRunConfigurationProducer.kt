@@ -10,7 +10,6 @@ import com.intellij.javascript.jest.JestRunSettings
 import com.intellij.javascript.jest.JestUtil
 import com.intellij.javascript.testFramework.AbstractTestFileStructure
 import com.intellij.javascript.testFramework.JsTestElementPath
-import com.intellij.javascript.testFramework.JsTestFileByTestNameIndex
 import com.intellij.javascript.testFramework.jasmine.JasmineFileStructure
 import com.intellij.javascript.testFramework.jasmine.JasmineFileStructureBuilder
 import com.intellij.javascript.testing.runScope.JsTestRunScope
@@ -18,7 +17,6 @@ import com.intellij.javascript.testing.runScope.JsTestRunScopeKind
 import com.intellij.json.psi.JsonProperty
 import com.intellij.lang.javascript.buildTools.npm.PackageJsonUtil
 import com.intellij.lang.javascript.psi.JSFile
-import com.intellij.lang.javascript.psi.JSTestFileType
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.util.Ref
@@ -165,8 +163,12 @@ class CompiledJestRunConfigurationProducer: JestRunConfigurationProducer() {
 
     private fun buildTestFileSettings(context: Context): ExtendedSettings? {
         val psiFile = context.psiFile
-        val testFileType = if (psiFile is JSFile) psiFile.testFileType else null
-        if (testFileType == JSTestFileType.JASMINE) {
+
+        val castedFile = psiFile as? JSFile
+        if (castedFile === null) {
+            return null
+        } else {
+            if (this.getTestFrameworkDetector().hasTestsInFile(castedFile)) {
             val builder: JestRunSettings.Builder = context.templateRunSettings.builder()
                 .scope { it: JsTestRunScope.Builder ->
                     Intrinsics.checkNotNullParameter(it, "it")
@@ -181,8 +183,9 @@ class CompiledJestRunConfigurationProducer: JestRunConfigurationProducer() {
                 context.file,
                 context.psiFile
             )
-        } else {
-            return null
+            } else {
+                return null
+            }
         }
     }
 
@@ -281,25 +284,23 @@ class CompiledJestRunConfigurationProducer: JestRunConfigurationProducer() {
         val contextFile = context.file
         val psiProjectDirectory = psiDirectory.project
         Intrinsics.checkNotNullExpressionValue(psiProjectDirectory, "getProject(...)")
-        return if (contextFile != psiProjectDirectory.guessProjectDir() && findDefaultConfigFile(context.file) == null) {
-            if (JsTestFileByTestNameIndex.hasJasmineTestsUnderDirectory(
-                    psiDirectory.project,
-                    context.file
-                )
-            ) ExtendedSettings(
+        if (contextFile != psiProjectDirectory.guessProjectDir() && findDefaultConfigFile(context.file) == null) {
+            val detector = this.getTestFrameworkDetector()
+            return if (detector.hasTestsUnderDirectory(psiProjectDirectory, contextFile))
+                ExtendedSettings(
                 this,
                 context.templateRunSettings.builder().scope { it: JsTestRunScope.Builder ->
-                        Intrinsics.checkNotNullParameter(it, "it")
-                        it.kind(JsTestRunScopeKind.DIRECTORY)
-                        val contextFilePath = context.file.path
-                        Intrinsics.checkNotNullExpressionValue(contextFilePath, "getPath(...)")
-                        it.testDirectoryPath(contextFilePath)
-                    }.build(),
+                    Intrinsics.checkNotNullParameter(it, "it")
+                    it.kind(JsTestRunScopeKind.DIRECTORY)
+                    val contextFilePath = context.file.path
+                    Intrinsics.checkNotNullExpressionValue(contextFilePath, "getPath(...)")
+                    it.testDirectoryPath(contextFilePath)
+                }.build(),
                 context.file,
                 psiDirectory as PsiElement
             ) else null
         } else {
-            ExtendedSettings(
+            return ExtendedSettings(
                 this,
                 context.templateRunSettings.builder().scope { it: JsTestRunScope.Builder ->
                     Intrinsics.checkNotNullParameter(it, "it")
@@ -329,7 +330,7 @@ class CompiledJestRunConfigurationProducer: JestRunConfigurationProducer() {
     }
 
     private inner class ExtendedSettings(
-        private val mine: CompiledJestRunConfigurationProducer,
+        mine: CompiledJestRunConfigurationProducer,
         initialSettings: JestRunSettings,
         contextFileOrDir: VirtualFile,
         @field:NotNull private val enclosingElement: PsiElement
